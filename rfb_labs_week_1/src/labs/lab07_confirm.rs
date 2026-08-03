@@ -19,26 +19,33 @@ pub fn mine_one_block<C: RpcClient>(client: &C, miner_address: &str) -> LabResul
         .as_array()
         .and_then(|blocks| blocks.first())
         .and_then(Value::as_str)
-        .map(str::to_owned)
+        .map(ToOwned::to_owned)
         .ok_or(LabError::MissingField("block hash"))
 }
 
-/// Return true if mempool has no transactions.
+/// Return true if the mempool contains no transactions.
 pub fn mempool_is_empty<C: RpcClient>(client: &C) -> LabResult<bool> {
     let raw = client.call(None, "getrawmempool", &[])?;
 
     let value = parse_cli_value(&raw)?;
 
-    Ok(value.as_array().map(|txs| txs.is_empty()).unwrap_or(false))
+    Ok(value
+        .as_array()
+        .map(|transactions| transactions.is_empty())
+        .unwrap_or(false))
 }
 
-/// Read transaction confirmations.
+/// Read the confirmation count for a wallet transaction.
 pub fn transaction_confirmations<C: RpcClient>(
     client: &C,
     wallet_name: &str,
     txid: &str,
 ) -> LabResult<i64> {
-    let raw = client.call(Some(wallet_name), "gettransaction", &[txid.to_owned()])?;
+    let raw = client.call(
+        Some(wallet_name),
+        "gettransaction",
+        &[txid.to_owned()],
+    )?;
 
     let value = parse_cli_value(&raw)?;
 
@@ -48,7 +55,7 @@ pub fn transaction_confirmations<C: RpcClient>(
         .ok_or(LabError::MissingField("confirmations"))
 }
 
-/// Mine a block, find transaction block, and prove membership.
+/// Confirm a transaction and verify that it exists inside its confirming block.
 pub fn confirm_and_locate_transaction<C: RpcClient>(
     client: &C,
     wallet_name: &str,
@@ -59,22 +66,26 @@ pub fn confirm_and_locate_transaction<C: RpcClient>(
 
     let mempool_is_empty = mempool_is_empty(client)?;
 
-    let raw = client.call(Some(wallet_name), "gettransaction", &[txid.to_owned()])?;
+    let raw = client.call(
+        Some(wallet_name),
+        "gettransaction",
+        &[txid.to_owned()],
+    )?;
 
-    let tx = parse_cli_value(&raw)?;
+    let transaction = parse_cli_value(&raw)?;
 
-    let block_hash = tx
+    let block_hash = transaction
         .get("blockhash")
         .and_then(Value::as_str)
         .ok_or(LabError::MissingField("blockhash"))?
         .to_owned();
 
-    let confirmations = tx
+    let confirmations = transaction
         .get("confirmations")
         .and_then(Value::as_i64)
         .ok_or(LabError::MissingField("confirmations"))?;
 
-    // Lab 07 requires ONLY block hash parameter.
+    // Bitcoin Core getblock RPC call using only the block hash.
     let block_raw = client.call(None, "getblock", &[block_hash.clone()])?;
 
     let block = parse_cli_value(&block_raw)?;
@@ -82,7 +93,11 @@ pub fn confirm_and_locate_transaction<C: RpcClient>(
     let transaction_is_in_block = block
         .get("tx")
         .and_then(Value::as_array)
-        .map(|txs| txs.iter().any(|entry| entry.as_str() == Some(txid)))
+        .map(|transactions| {
+            transactions
+                .iter()
+                .any(|entry| entry.as_str() == Some(txid))
+        })
         .unwrap_or(false);
 
     Ok(ConfirmationReport {
