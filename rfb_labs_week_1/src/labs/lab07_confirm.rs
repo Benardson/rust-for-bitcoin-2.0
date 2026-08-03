@@ -17,7 +17,7 @@ pub fn mine_one_block<C: RpcClient>(client: &C, miner_address: &str) -> LabResul
 
     value
         .as_array()
-        .and_then(|v| v.first())
+        .and_then(|blocks| blocks.first())
         .and_then(Value::as_str)
         .map(str::to_owned)
         .ok_or(LabError::MissingField("block hash"))
@@ -48,7 +48,7 @@ pub fn transaction_confirmations<C: RpcClient>(
         .ok_or(LabError::MissingField("confirmations"))
 }
 
-/// Mine a block, find the transaction block, and prove membership.
+/// Mine a block, find transaction block, and prove membership.
 pub fn confirm_and_locate_transaction<C: RpcClient>(
     client: &C,
     wallet_name: &str,
@@ -74,7 +74,7 @@ pub fn confirm_and_locate_transaction<C: RpcClient>(
         .and_then(Value::as_i64)
         .ok_or(LabError::MissingField("confirmations"))?;
 
-    // DO NOT add "1" here.
+    // Lab 07 requires ONLY block hash parameter.
     let block_raw = client.call(None, "getblock", &[block_hash.clone()])?;
 
     let block = parse_cli_value(&block_raw)?;
