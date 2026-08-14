@@ -1,71 +1,210 @@
-use std::io::{Read, Error};
-// use clap::{Parser, Subcommand};
-use clap::{Arg, Command};
-use std::fmt;
-use sha2::{Sha256, Sha512, Digest}; // https://docs.rs/sha2/latest/sha2/
+use serde_json::to_string_pretty;
+use sha2::{Digest, Sha256};
+use std::io::{Error, ErrorKind};
+
 use transaction::{Amount, Input, Output, Transaction, Txid};
+
 mod transaction;
 
-// #[derive(Parser)]
-// #[command(name= " Transaction decoder")]
-// #[command(version= "1.0")]
-// #[command(about= "Bitcoin Transaction decoder", long_about=None)]
-// struct CLI {
-//       #[arg(
-//             required = true,
-//             help="(string, required) Row Transaction hex"
-//         )]
-//     transaction_hex: String
-// }
+fn read_u32(bytes: &mut &[u8]) -> Result<u32, Error> {
+    if bytes.len() < 4 {
+        return Err(Error::new(ErrorKind::UnexpectedEof, "not enough bytes"));
+    }
 
+    let value = u32::from_le_bytes(bytes[..4].try_into().unwrap());
+    *bytes = &bytes[4..];
 
-#[allow(unused_variables)]
-fn read_version(transaction_hex: &str) -> u32 {
- 
+    Ok(value)
 }
 
+fn read_u64(bytes: &mut &[u8]) -> Result<u64, Error> {
+    if bytes.len() < 8 {
+        return Err(Error::new(ErrorKind::UnexpectedEof, "not enough bytes"));
+    }
 
-fn read_u64(transaction_bytes: &mut &[u8]) -> u64 {
-  
+    let value = u64::from_le_bytes(bytes[..8].try_into().unwrap());
+    *bytes = &bytes[8..];
+
+    Ok(value)
 }
 
-fn read_amount(transaction_bytes: &mut &[u8]) -> Result<Amount, Error> {
-
+fn read_amount(bytes: &mut &[u8]) -> Result<Amount, Error> {
+    Ok(Amount::from_sat(read_u64(bytes)?))
 }
 
+fn read_compact_size(bytes: &mut &[u8]) -> Result<u64, Error> {
+    if bytes.is_empty() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedEof,
+            "missing compact size",
+        ));
+    }
 
+    let prefix = bytes[0];
+    *bytes = &bytes[1..];
 
-fn read_u32(bytes_slice: &mut &[u8]) ->Result<u32, Error> {}
-  
+    match prefix {
+        0..=252 => Ok(prefix as u64),
 
+        253 => {
+            if bytes.len() < 2 {
+                return Err(Error::new(ErrorKind::UnexpectedEof, "missing u16"));
+            }
 
-fn read_compact_size(transaction_bytes: &mut &[u8]) -> Result<u64, Error> {
+            let value = u16::from_le_bytes(bytes[..2].try_into().unwrap()) as u64;
+            *bytes = &bytes[2..];
 
- 
+            Ok(value)
+        }
+
+        254 => {
+            if bytes.len() < 4 {
+                return Err(Error::new(ErrorKind::UnexpectedEof, "missing u32"));
+            }
+
+            let value = u32::from_le_bytes(bytes[..4].try_into().unwrap()) as u64;
+            *bytes = &bytes[4..];
+
+            Ok(value)
+        }
+
+        255 => {
+            if bytes.len() < 8 {
+                return Err(Error::new(ErrorKind::UnexpectedEof, "missing u64"));
+            }
+
+            let value = u64::from_le_bytes(bytes[..8].try_into().unwrap());
+            *bytes = &bytes[8..];
+
+            Ok(value)
+        }
+    }
 }
 
-fn read_txid(transaction_bytes: &mut &[u8]) -> Result<Txid, Error> {
-  
+fn read_txid(bytes: &mut &[u8]) -> Result<Txid, Error> {
+    if bytes.len() < 32 {
+        return Err(Error::new(ErrorKind::UnexpectedEof, "missing txid"));
+    }
+
+    let txid: [u8; 32] = bytes[..32].try_into().unwrap();
+    *bytes = &bytes[32..];
+
+    Ok(Txid::from_bytes(txid))
 }
 
+fn hex_to_bytes(hex: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let hex = hex.trim();
 
+    if hex.len() % 2 != 0 {
+        return Err("invalid hex length".into());
+    }
 
-fn read_script_size(transaction_bytes: &mut &[u8]) -> Result<String, Error> {
+    let mut bytes = Vec::with_capacity(hex.len() / 2);
 
+    for i in (0..hex.len()).step_by(2) {
+        bytes.push(u8::from_str_radix(&hex[i..i + 2], 16)?);
+    }
+
+    Ok(bytes)
 }
 
-fn read_version_byte(transaction_bytes: &mut &[u8]) -> Result<u32, Error> {
+fn hash_transaction(bytes: &[u8]) -> Txid {
+    let first_hash = Sha256::digest(bytes);
+    let second_hash = Sha256::digest(first_hash);
 
+    let result: [u8; 32] = second_hash.into();
+
+    Txid::from_bytes(result)
 }
-// Bitcoin uses little-endian encoding for most of its numeric fields, meaning the least significant byte comes first.
 
-fn hash_row_transaction(row_transaction_bytes: &[u8]) -> Result<Txid, Error> {
+pub fn decode_transaction(
+    transaction_hex: String,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let bytes = hex_to_bytes(&transaction_hex)?;
+    let mut remaining: &[u8] = &bytes;
 
+    let version = read_u32(&mut remaining)?;
 
-}
+    let segwit = remaining.len() >= 2
+        && remaining[0] == 0x00
+        && remaining[1] == 0x01;
 
+    if segwit {
+        remaining = &remaining[2..];
+    }
 
-pub fn decode_transaction(transaction_hex: String) -> Result<String, Box<dyn std::error::Error>> {
-    
+    let input_count = read_compact_size(&mut remaining)? as usize;
+    let mut inputs = Vec::with_capacity(input_count);
 
+    for _ in 0..input_count {
+        let txid = read_txid(&mut remaining)?;
+        let output_index = read_u32(&mut remaining)?;
+
+        let script_len = read_compact_size(&mut remaining)? as usize;
+
+        if remaining.len() < script_len {
+            return Err("invalid scriptSig length".into());
+        }
+
+        let script_sig = remaining[..script_len].to_vec();
+        remaining = &remaining[script_len..];
+
+        let sequence = read_u32(&mut remaining)?;
+
+        inputs.push(Input {
+            txid,
+            output_index,
+            script_sig,
+            sequence,
+        });
+    }
+
+    let output_count = read_compact_size(&mut remaining)? as usize;
+    let mut outputs = Vec::with_capacity(output_count);
+
+    for _ in 0..output_count {
+        let amount = read_amount(&mut remaining)?;
+
+        let script_len = read_compact_size(&mut remaining)? as usize;
+
+        if remaining.len() < script_len {
+            return Err("invalid scriptPubKey length".into());
+        }
+
+        let script_pubkey = remaining[..script_len].to_vec();
+        remaining = &remaining[script_len..];
+
+        outputs.push(Output {
+            amount,
+            script_pubkey,
+        });
+    }
+
+    if segwit {
+        for _ in 0..input_count {
+            let witness_count = read_compact_size(&mut remaining)? as usize;
+
+            for _ in 0..witness_count {
+                let witness_len = read_compact_size(&mut remaining)? as usize;
+
+                if remaining.len() < witness_len {
+                    return Err("invalid witness length".into());
+                }
+
+                remaining = &remaining[witness_len..];
+            }
+        }
+    }
+
+    let lock_time = read_u32(&mut remaining)?;
+
+    let transaction = Transaction {
+        transaction_id: hash_transaction(&bytes),
+        version,
+        inputs,
+        outputs,
+        lock_time,
+    };
+
+    Ok(to_string_pretty(&transaction)?)
 }
