@@ -23,13 +23,13 @@ A Rust CLI application for constructing and serializing Bitcoin transactions wit
 
 ## Usage
 
-````powershell
+```powershell
 cargo run -- --help
 ``` 
 
 ### Input format
 
-````text
+```text
 TXID:VOUT:SEQUENCE:SCRIPTSIG
 ``` 
 
@@ -37,7 +37,7 @@ Repeat --input for multiple inputs.
 
 ### Output format
 
-````text
+```text
 AMOUNT_IN_SATOSHIS:SCRIPTPUBKEY
 ``` 
 
@@ -45,7 +45,7 @@ Repeat --output for multiple outputs.
 
 ### Witness format
 
-````text
+```text
 INPUT_INDEX:ITEM_HEX
 ``` 
 
@@ -68,4 +68,5 @@ The program displays transaction version, SegWit status, input/output counts, wi
 ## Verification
 
 Run cargo fmt -- --check, cargo check, and cargo build before submission.
+
 
