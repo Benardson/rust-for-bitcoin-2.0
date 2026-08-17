@@ -17,37 +17,40 @@ A Rust CLI application for constructing and serializing Bitcoin transactions wit
 - Meaningful validation errors
 
 ## Requirements
-
 - Rust
 - Cargo
 
 ## Usage
 
-```powershell
+```
+powershell
 cargo run -- --help
-``` 
+```
 
 ### Input format
 
-```text
+```
+text
 TXID:VOUT:SEQUENCE:SCRIPTSIG
-``` 
+```
 
 Repeat --input for multiple inputs.
 
 ### Output format
 
-```text
+```
+text
 AMOUNT_IN_SATOSHIS:SCRIPTPUBKEY
-``` 
+```
 
 Repeat --output for multiple outputs.
 
 ### Witness format
 
-```text
+```
+text
 INPUT_INDEX:ITEM_HEX
-``` 
+```
 
 Repeat --witness for multiple witness items.
 
@@ -63,10 +66,74 @@ User-provided hexadecimal values are validated before conversion into bytes. Inv
 
 ## Output
 
-The program displays transaction version, SegWit status, input/output counts, witness data, locktime, serialized transaction hexadecimal, and transaction size in bytes.
+The program displays:
+
+- Transaction version
+- SegWit status
+- Transaction input count
+- Transaction output count
+- Witness data status
+- Locktime
+- Serialized transaction hexadecimal
+- Transaction size in bytes
+
+## Examples
+
+### 1 input and 1 output
+
+```
+powershell
+cargo run -- `
+  --version 2 `
+  --input "1111111111111111111111111111111111111111111111111111111111111111:0:4294967295:" `
+  --output "100000:0014aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" `
+  --locktime 0
+```
+
+### Multiple inputs and outputs
+
+```
+powershell
+cargo run -- `
+  --version 2 `
+  --input "1111111111111111111111111111111111111111111111111111111111111111:0:4294967295:" `
+  --input "2222222222222222222222222222222222222222222222222222222222222222:1:4294967295:" `
+  --output "100000:0014aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" `
+  --output "50000:0014bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" `
+  --locktime 0
+```
+
+### SegWit with multiple witness items
+
+```
+powershell
+cargo run -- `
+  --version 2 `
+  --input "1111111111111111111111111111111111111111111111111111111111111111:0:4294967295:" `
+  --output "100000:0014aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" `
+  --witness "0:0102030405060708090a" `
+  --witness "0:02030405060708090a0b" `
+  --locktime 0
+```
+
+### Invalid hexadecimal input
+
+```
+powershell
+cargo run -- `
+  --version 2 `
+  --input "NOT_HEX:0:4294967295:" `
+  --output "100000:0014aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+```
+
+The program returns a meaningful validation error instead of panicking.
 
 ## Verification
 
-Run cargo fmt -- --check, cargo check, and cargo build before submission.
-
-
+Run:
+```
+powershell
+cargo fmt -- --check
+cargo check
+cargo build
+```
