@@ -15,6 +15,7 @@ pub struct Input {
     pub output_index: u32,
     pub script_sig: Vec<u8>,
     pub sequence: u32,
+    pub witness: Vec<Vec<u8>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -24,10 +25,7 @@ pub struct Output {
     pub script_pubkey: Vec<u8>,
 }
 
-fn as_btc<S: Serializer, T: BitcoinValue>(
-    value: &T,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
+fn as_btc<S: Serializer, T: BitcoinValue>(value: &T, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.serialize_f64(value.to_btc())
 }
 

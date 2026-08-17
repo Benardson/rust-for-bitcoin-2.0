@@ -1,125 +1,157 @@
-use serde_json::to_string_pretty;
 use sha2::{Digest, Sha256};
-use std::io::{Error, ErrorKind};
+use std::fmt;
 
 use transaction::{Amount, Input, Output, Transaction, Txid};
 
 mod transaction;
 
-fn read_u32(bytes: &mut &[u8]) -> Result<u32, Error> {
-    if bytes.len() < 4 {
-        return Err(Error::new(ErrorKind::UnexpectedEof, "not enough bytes"));
-    }
+#[derive(Debug)]
+pub struct BuildError(String);
 
-    let value = u32::from_le_bytes(bytes[..4].try_into().unwrap());
-    *bytes = &bytes[4..];
-
-    Ok(value)
-}
-
-fn read_u64(bytes: &mut &[u8]) -> Result<u64, Error> {
-    if bytes.len() < 8 {
-        return Err(Error::new(ErrorKind::UnexpectedEof, "not enough bytes"));
-    }
-
-    let value = u64::from_le_bytes(bytes[..8].try_into().unwrap());
-    *bytes = &bytes[8..];
-
-    Ok(value)
-}
-
-fn read_amount(bytes: &mut &[u8]) -> Result<Amount, Error> {
-    Ok(Amount::from_sat(read_u64(bytes)?))
-}
-
-fn read_compact_size(bytes: &mut &[u8]) -> Result<u64, Error> {
-    if bytes.is_empty() {
-        return Err(Error::new(ErrorKind::UnexpectedEof, "missing compact size"));
-    }
-
-    let prefix = bytes[0];
-    *bytes = &bytes[1..];
-
-    match prefix {
-        0..=252 => Ok(prefix as u64),
-
-        253 => {
-            if bytes.len() < 2 {
-                return Err(Error::new(ErrorKind::UnexpectedEof, "missing u16"));
-            }
-
-            let value = u16::from_le_bytes(bytes[..2].try_into().unwrap()) as u64;
-
-            *bytes = &bytes[2..];
-
-            Ok(value)
-        }
-
-        254 => {
-            if bytes.len() < 4 {
-                return Err(Error::new(ErrorKind::UnexpectedEof, "missing u32"));
-            }
-
-            let value = u32::from_le_bytes(bytes[..4].try_into().unwrap()) as u64;
-
-            *bytes = &bytes[4..];
-
-            Ok(value)
-        }
-
-        255 => {
-            if bytes.len() < 8 {
-                return Err(Error::new(ErrorKind::UnexpectedEof, "missing u64"));
-            }
-
-            let value = u64::from_le_bytes(bytes[..8].try_into().unwrap());
-
-            *bytes = &bytes[8..];
-
-            Ok(value)
-        }
+impl fmt::Display for BuildError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
-fn read_txid(bytes: &mut &[u8]) -> Result<Txid, Error> {
-    if bytes.len() < 32 {
-        return Err(Error::new(ErrorKind::UnexpectedEof, "missing txid"));
+impl std::error::Error for BuildError {}
+
+pub fn parse_hex(value: &str, field: &str) -> Result<Vec<u8>, BuildError> {
+    let value = value.trim();
+
+    if value.is_empty() {
+        return Err(BuildError(format!("{} cannot be empty", field)));
     }
 
-    let txid: [u8; 32] = bytes[..32].try_into().unwrap();
+    if value.len() % 2 != 0 {
+        return Err(BuildError(format!(
+            "{} must contain an even number of hexadecimal characters",
+            field
+        )));
+    }
 
-    *bytes = &bytes[32..];
+    if !value.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(BuildError(format!(
+            "{} contains invalid hexadecimal characters: '{}'",
+            field, value
+        )));
+    }
+
+    hex::decode(value).map_err(|e| BuildError(format!("invalid hexadecimal {}: {}", field, e)))
+}
+
+pub fn parse_txid(value: &str) -> Result<Txid, BuildError> {
+    let bytes = parse_hex(value, "TXID")?;
+
+    if bytes.len() != 32 {
+        return Err(BuildError(format!(
+            "TXID must be exactly 32 bytes (64 hex characters), got {} bytes",
+            bytes.len()
+        )));
+    }
+
+    let mut txid = [0u8; 32];
+
+    for (i, byte) in bytes.iter().enumerate() {
+        txid[31 - i] = *byte;
+    }
 
     Ok(Txid::from_bytes(txid))
 }
 
-fn hex_to_bytes(hex: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let hex = hex.trim();
+pub fn parse_input(value: &str) -> Result<Input, BuildError> {
+    let parts: Vec<&str> = value.splitn(4, ':').collect();
 
-    if hex.is_empty() {
-        return Err("transaction hex is empty".into());
+    if parts.len() != 4 {
+        return Err(BuildError(
+            "input must use TXID:VOUT:SEQUENCE:SCRIPTSIG".to_string(),
+        ));
     }
 
-    if !hex.len().is_multiple_of(2) {
-        return Err("invalid hex length".into());
-    }
+    let txid = parse_txid(parts[0])?;
 
-    let mut bytes = Vec::with_capacity(hex.len() / 2);
+    let output_index = parts[1]
+        .parse::<u32>()
+        .map_err(|_| BuildError(format!("invalid input output index '{}'", parts[1])))?;
 
-    for i in (0..hex.len()).step_by(2) {
-        bytes.push(u8::from_str_radix(&hex[i..i + 2], 16)?);
-    }
+    let sequence = parse_u32(parts[2], "input sequence")?;
 
-    Ok(bytes)
+    let script_sig = if parts[3].is_empty() {
+        Vec::new()
+    } else {
+        parse_hex(parts[3], "scriptSig")?
+    };
+
+    Ok(Input {
+        txid,
+        output_index,
+        script_sig,
+        sequence,
+        witness: Vec::new(),
+    })
 }
 
-fn hash_transaction(bytes: &[u8]) -> Txid {
-    let first_hash = Sha256::digest(bytes);
-    let second_hash = Sha256::digest(first_hash);
+pub fn parse_output(value: &str) -> Result<Output, BuildError> {
+    let parts: Vec<&str> = value.splitn(2, ':').collect();
 
-    let result: [u8; 32] = second_hash.into();
+    if parts.len() != 2 {
+        return Err(BuildError(
+            "output must use AMOUNT_IN_SATOSHIS:SCRIPTPUBKEY".to_string(),
+        ));
+    }
 
-    Txid::from_bytes(result)
+    let amount = parts[0].parse::<u64>().map_err(|_| {
+        BuildError(format!(
+            "invalid output amount '{}'; amount must be satoshis",
+            parts[0]
+        ))
+    })?;
+
+    let script_pubkey = parse_hex(parts[1], "scriptPubKey")?;
+
+    Ok(Output {
+        amount: Amount::from_sat(amount),
+        script_pubkey,
+    })
+}
+
+fn parse_u32(value: &str, field: &str) -> Result<u32, BuildError> {
+    if let Some(hex_value) = value.strip_prefix("0x") {
+        u32::from_str_radix(hex_value, 16)
+            .map_err(|_| BuildError(format!("invalid hexadecimal {} '{}'", field, value)))
+    } else {
+        value
+            .parse::<u32>()
+            .map_err(|_| BuildError(format!("invalid {} '{}'", field, value)))
+    }
+}
+
+pub fn add_witness(inputs: &mut [Input], value: &str) -> Result<(), BuildError> {
+    let parts: Vec<&str> = value.splitn(2, ':').collect();
+
+    if parts.len() != 2 {
+        return Err(BuildError(
+            "witness must use INPUT_INDEX:ITEM_HEX".to_string(),
+        ));
+    }
+
+    let input_index = parts[0]
+        .parse::<usize>()
+        .map_err(|_| BuildError(format!("invalid witness input index '{}'", parts[0])))?;
+
+    if input_index >= inputs.len() {
+        return Err(BuildError(format!(
+            "witness input index {} is out of range; there are {} inputs",
+            input_index,
+            inputs.len()
+        )));
+    }
+
+    let item = parse_hex(parts[1], "witness item")?;
+
+    inputs[input_index].witness.push(item);
+
+    Ok(())
 }
 
 fn encode_compact_size(value: u64) -> Vec<u8> {
@@ -151,9 +183,7 @@ fn serialize_input(input: &Input) -> Vec<u8> {
 
     bytes.extend_from_slice(&input.txid.0);
     bytes.extend_from_slice(&input.output_index.to_le_bytes());
-
     bytes.extend_from_slice(&encode_compact_size(input.script_sig.len() as u64));
-
     bytes.extend_from_slice(&input.script_sig);
     bytes.extend_from_slice(&input.sequence.to_le_bytes());
 
@@ -164,9 +194,7 @@ fn serialize_output(output: &Output) -> Vec<u8> {
     let mut bytes = Vec::new();
 
     bytes.extend_from_slice(&output.amount.0.to_le_bytes());
-
     bytes.extend_from_slice(&encode_compact_size(output.script_pubkey.len() as u64));
-
     bytes.extend_from_slice(&output.script_pubkey);
 
     bytes
@@ -181,7 +209,6 @@ fn serialize_for_txid(
     let mut bytes = Vec::new();
 
     bytes.extend_from_slice(&version.to_le_bytes());
-
     bytes.extend_from_slice(&encode_compact_size(inputs.len() as u64));
 
     for input in inputs {
@@ -199,94 +226,80 @@ fn serialize_for_txid(
     bytes
 }
 
-pub fn decode_transaction(transaction_hex: String) -> Result<String, Box<dyn std::error::Error>> {
-    let bytes = hex_to_bytes(&transaction_hex)?;
-    let mut remaining: &[u8] = &bytes;
+pub fn serialize_transaction(
+    version: u32,
+    inputs: &[Input],
+    outputs: &[Output],
+    lock_time: u32,
+) -> Vec<u8> {
+    let has_witness = inputs.iter().any(|input| !input.witness.is_empty());
 
-    let version = read_u32(&mut remaining)?;
+    let mut bytes = Vec::new();
 
-    let segwit = remaining.len() >= 2 && remaining[0] == 0x00 && remaining[1] == 0x01;
+    bytes.extend_from_slice(&version.to_le_bytes());
 
-    if segwit {
-        remaining = &remaining[2..];
+    if has_witness {
+        bytes.push(0x00);
+        bytes.push(0x01);
     }
 
-    let input_count = read_compact_size(&mut remaining)? as usize;
+    bytes.extend_from_slice(&encode_compact_size(inputs.len() as u64));
 
-    let mut inputs = Vec::with_capacity(input_count);
-
-    for _ in 0..input_count {
-        let txid = read_txid(&mut remaining)?;
-
-        let output_index = read_u32(&mut remaining)?;
-
-        let script_len = read_compact_size(&mut remaining)? as usize;
-
-        if remaining.len() < script_len {
-            return Err("invalid scriptSig length".into());
-        }
-
-        let script_sig = remaining[..script_len].to_vec();
-
-        remaining = &remaining[script_len..];
-
-        let sequence = read_u32(&mut remaining)?;
-
-        inputs.push(Input {
-            txid,
-            output_index,
-            script_sig,
-            sequence,
-        });
+    for input in inputs {
+        bytes.extend_from_slice(&serialize_input(input));
     }
 
-    let output_count = read_compact_size(&mut remaining)? as usize;
+    bytes.extend_from_slice(&encode_compact_size(outputs.len() as u64));
 
-    let mut outputs = Vec::with_capacity(output_count);
-
-    for _ in 0..output_count {
-        let amount = read_amount(&mut remaining)?;
-
-        let script_len = read_compact_size(&mut remaining)? as usize;
-
-        if remaining.len() < script_len {
-            return Err("invalid scriptPubKey length".into());
-        }
-
-        let script_pubkey = remaining[..script_len].to_vec();
-
-        remaining = &remaining[script_len..];
-
-        outputs.push(Output {
-            amount,
-            script_pubkey,
-        });
+    for output in outputs {
+        bytes.extend_from_slice(&serialize_output(output));
     }
 
-    // SegWit witness data is not part of the TXID.
-    if segwit {
-        for _ in 0..input_count {
-            let witness_count = read_compact_size(&mut remaining)? as usize;
+    if has_witness {
+        for input in inputs {
+            bytes.extend_from_slice(&encode_compact_size(input.witness.len() as u64));
 
-            for _ in 0..witness_count {
-                let witness_len = read_compact_size(&mut remaining)? as usize;
-
-                if remaining.len() < witness_len {
-                    return Err("invalid witness length".into());
-                }
-
-                remaining = &remaining[witness_len..];
+            for item in &input.witness {
+                bytes.extend_from_slice(&encode_compact_size(item.len() as u64));
+                bytes.extend_from_slice(item);
             }
         }
     }
 
-    let lock_time = read_u32(&mut remaining)?;
+    bytes.extend_from_slice(&lock_time.to_le_bytes());
 
-    if !remaining.is_empty() {
-        return Err("unexpected bytes after locktime".into());
+    bytes
+}
+
+fn hash_transaction(bytes: &[u8]) -> Txid {
+    let first_hash = Sha256::digest(bytes);
+    let second_hash = Sha256::digest(first_hash);
+
+    let result: [u8; 32] = second_hash.into();
+
+    Txid::from_bytes(result)
+}
+
+pub fn build_transaction(
+    version: u32,
+    inputs: Vec<Input>,
+    outputs: Vec<Output>,
+    lock_time: u32,
+) -> Result<(String, usize, Transaction), BuildError> {
+    if inputs.is_empty() {
+        return Err(BuildError(
+            "transaction must contain at least one input".to_string(),
+        ));
     }
 
-    // TXID serialization excludes SegWit marker, flag and witness.
+    if outputs.is_empty() {
+        return Err(BuildError(
+            "transaction must contain at least one output".to_string(),
+        ));
+    }
+
+    let serialized = serialize_transaction(version, &inputs, &outputs, lock_time);
+
     let txid_bytes = serialize_for_txid(version, &inputs, &outputs, lock_time);
 
     let transaction_id = hash_transaction(&txid_bytes);
@@ -299,5 +312,5 @@ pub fn decode_transaction(transaction_hex: String) -> Result<String, Box<dyn std
         lock_time,
     };
 
-    Ok(to_string_pretty(&transaction)?)
+    Ok((hex::encode(&serialized), serialized.len(), transaction))
 }
