@@ -23,7 +23,7 @@ pub fn parse_hex(value: &str, field: &str) -> Result<Vec<u8>, BuildError> {
         return Err(BuildError(format!("{} cannot be empty", field)));
     }
 
-    if value.len() % 2 != 0 {
+    if !value.len().is_multiple_of(2) {
         return Err(BuildError(format!(
             "{} must contain an even number of hexadecimal characters",
             field

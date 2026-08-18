@@ -11,6 +11,10 @@ struct Args {
     #[arg(short = 'v', long, default_value_t = 2)]
     version: u32,
 
+    /// SegWit status (true or false)
+    #[arg(long, default_value_t = false)]
+    segwit: bool,
+
     /// Input: TXID:VOUT:SEQUENCE:SCRIPTSIG
     /// Repeat for multiple inputs.
     #[arg(short = 'i', long = "input", required = true)]
@@ -58,6 +62,14 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let has_witness = inputs.iter().any(|input| !input.witness.is_empty());
+
+    if args.segwit && !has_witness {
+        return Err("SegWit is enabled but no witness data was provided".into());
+    }
+
+    if !args.segwit && has_witness {
+        return Err("witness data was provided but SegWit is disabled".into());
+    }
 
     let (serialized, size, transaction) =
         build_transaction(args.version, inputs, outputs, args.locktime)?;

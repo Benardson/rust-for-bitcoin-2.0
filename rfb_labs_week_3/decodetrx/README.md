@@ -1,4 +1,4 @@
-﻿# Bitcoin Transaction Serializer
+# Bitcoin Transaction Serializer
 
 A Rust CLI application for constructing and serializing Bitcoin transactions without modifying the Rust source code.
 
@@ -7,6 +7,7 @@ A Rust CLI application for constructing and serializing Bitcoin transactions wit
 - Transaction version
 - Multiple inputs
 - Multiple outputs
+- SegWit status (--segwit enables SegWit; omit it to disable SegWit)
 - SegWit witness data
 - Multiple witness items
 - Locktime
@@ -22,15 +23,13 @@ A Rust CLI application for constructing and serializing Bitcoin transactions wit
 
 ## Usage
 
-```
-powershell
+```powershell
 cargo run -- --help
 ```
 
 ### Input format
 
-```
-text
+```text
 TXID:VOUT:SEQUENCE:SCRIPTSIG
 ```
 
@@ -38,8 +37,7 @@ Repeat --input for multiple inputs.
 
 ### Output format
 
-```
-text
+```text
 AMOUNT_IN_SATOSHIS:SCRIPTPUBKEY
 ```
 
@@ -47,8 +45,7 @@ Repeat --output for multiple outputs.
 
 ### Witness format
 
-```
-text
+```text
 INPUT_INDEX:ITEM_HEX
 ```
 
@@ -81,8 +78,7 @@ The program displays:
 
 ### 1 input and 1 output
 
-```
-powershell
+```powershell
 cargo run -- `
   --version 2 `
   --input "1111111111111111111111111111111111111111111111111111111111111111:0:4294967295:" `
@@ -92,8 +88,7 @@ cargo run -- `
 
 ### Multiple inputs and outputs
 
-```
-powershell
+```powershell
 cargo run -- `
   --version 2 `
   --input "1111111111111111111111111111111111111111111111111111111111111111:0:4294967295:" `
@@ -105,10 +100,10 @@ cargo run -- `
 
 ### SegWit with multiple witness items
 
-```
-powershell
+```powershell
 cargo run -- `
   --version 2 `
+  --segwit `
   --input "1111111111111111111111111111111111111111111111111111111111111111:0:4294967295:" `
   --output "100000:0014aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" `
   --witness "0:0102030405060708090a" `
@@ -118,22 +113,21 @@ cargo run -- `
 
 ### Invalid hexadecimal input
 
-```
-powershell
+```powershell
 cargo run -- `
   --version 2 `
   --input "NOT_HEX:0:4294967295:" `
   --output "100000:0014aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 ```
 
-The program returns a meaningful validation error instead of panicking.
-
-## Verification
+The program returns a meaningful validation error instead of panicking.rnrn## Verification
 
 Run:
-```
-powershell
+
+```powershell
 cargo fmt -- --check
-cargo check
+cargo check --all-targets
+cargo clippy --all-targets -- -D warnings
+cargo test --all-targets
 cargo build
-```
+git diff --checkrn
