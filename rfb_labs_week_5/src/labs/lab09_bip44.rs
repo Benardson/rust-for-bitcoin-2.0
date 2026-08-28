@@ -1,4 +1,4 @@
-use bitcoin::bip32::{DerivationPath, ExtendedPrivKey};
+use bitcoin::bip32::{DerivationPath, Xpriv};
 use bitcoin::{Address, Network, PublicKey};
 
 use crate::model::Bip44PathInfo;
@@ -103,7 +103,7 @@ pub fn derive_bip44_address(
     let seed = hex::decode(seed_hex)
         .map_err(|e| crate::LabError::Derivation(format!("invalid BIP39 seed: {e}")))?;
 
-    let master = ExtendedPrivKey::new_master(network, &seed)
+    let master = Xpriv::new_master(network, &seed)
         .map_err(|e| crate::LabError::Derivation(format!("failed to create master key: {e}")))?;
 
     let derivation_path: DerivationPath = path
@@ -118,7 +118,7 @@ pub fn derive_bip44_address(
 
     let public_key = PublicKey::new(child.private_key.public_key(&secp));
 
-    let address = Address::p2pkh(&public_key, network);
+    let address = Address::p2pkh(public_key, network);
 
     Ok(address.to_string())
 }

@@ -49,7 +49,7 @@ pub fn derive_address_for_path(
 
     let address = match format {
         // BIP44-style legacy P2PKH.
-        AddressFormat::P2pkh => Address::p2pkh(&public_key, network),
+        AddressFormat::P2pkh => Address::p2pkh(public_key, network),
 
         // BIP84-style native SegWit P2WPKH.
         AddressFormat::P2wpkh => Address::p2wpkh(&compressed, network),

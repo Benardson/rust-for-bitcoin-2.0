@@ -1,5 +1,5 @@
 use bip39::{Language, Mnemonic};
-use bitcoin::bip32::{ChildNumber, DerivationPath, ExtendedPrivKey, ExtendedPubKey};
+use bitcoin::bip32::{ChildNumber, DerivationPath, Xpriv, Xpub};
 use bitcoin::{Network, PrivateKey};
 
 use crate::error::LabError;
@@ -15,8 +15,8 @@ pub fn master_xpriv(mnemonic: &str, passphrase: &str, network: Network) -> LabRe
 
     let seed = mnemonic.to_seed(passphrase);
 
-    let xpriv = ExtendedPrivKey::new_master(network, &seed)
-        .map_err(|e| LabError::Derivation(e.to_string()))?;
+    let xpriv =
+        Xpriv::new_master(network, &seed).map_err(|e| LabError::Derivation(e.to_string()))?;
 
     Ok(xpriv.to_string())
 }
@@ -35,8 +35,8 @@ pub fn derive_extended_keys(
 
     let seed = mnemonic.to_seed(passphrase);
 
-    let master = ExtendedPrivKey::new_master(network, &seed)
-        .map_err(|e| LabError::Derivation(e.to_string()))?;
+    let master =
+        Xpriv::new_master(network, &seed).map_err(|e| LabError::Derivation(e.to_string()))?;
 
     let derivation_path = path
         .parse::<DerivationPath>()
@@ -48,7 +48,7 @@ pub fn derive_extended_keys(
         .derive_priv(&secp, &derivation_path)
         .map_err(|e| LabError::Derivation(e.to_string()))?;
 
-    let xpub = ExtendedPubKey::from_priv(&secp, &derived);
+    let xpub = Xpub::from_priv(&secp, &derived);
 
     Ok(ExtendedKeyReport {
         derivation_path: path.to_owned(),
@@ -66,7 +66,7 @@ pub fn derive_normal_child_xpub(parent_xpub: &str, index: u32) -> LabResult<Stri
     }
 
     let xpub = parent_xpub
-        .parse::<ExtendedPubKey>()
+        .parse::<Xpub>()
         .map_err(|e| LabError::InvalidKey(e.to_string()))?;
 
     let child_number = ChildNumber::Normal { index };
