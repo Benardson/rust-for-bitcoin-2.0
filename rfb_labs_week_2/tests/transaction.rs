@@ -23,7 +23,6 @@ fn output(value: u64, recipient: &str) -> TxOutput {
 // implement the TODOs. Remove `#[ignore]` from one test at a time while working.
 
 #[test]
-#[ignore = "enable after completing Parts 3 and 5"]
 fn valid_regular_transaction_passes_validation() {
     let mut transaction = Transaction::new(2, 0);
     transaction.add_input(regular_input(120_000));
@@ -37,7 +36,6 @@ fn valid_regular_transaction_passes_validation() {
 }
 
 #[test]
-#[ignore = "enable after completing Part 5"]
 fn outputs_cannot_exceed_inputs() {
     let mut transaction = Transaction::new(2, 0);
     transaction.add_input(regular_input(50_000));
@@ -49,5 +47,55 @@ fn outputs_cannot_exceed_inputs() {
             total_inputs: 50_000,
             total_outputs: 60_000,
         })
+    );
+}
+
+#[test]
+fn validation_rejects_no_inputs() {
+    let mut transaction = Transaction::new(2, 0);
+    transaction.add_output(output(1_000, "bc1qreceiver"));
+
+    assert_eq!(
+        transaction.validate(),
+        Err(rfb_labs_week_2::TransactionError::NoInputs)
+    );
+}
+
+#[test]
+fn validation_rejects_no_outputs() {
+    let mut transaction = Transaction::new(2, 0);
+    transaction.add_input(regular_input(1_000));
+
+    assert_eq!(
+        transaction.validate(),
+        Err(rfb_labs_week_2::TransactionError::NoOutputs)
+    );
+}
+
+#[test]
+fn validation_rejects_zero_value_non_op_return_output() {
+    let mut transaction = Transaction::new(2, 0);
+    transaction.add_input(regular_input(1_000));
+    transaction.add_output(output(0, "bc1qreceiver"));
+
+    assert_eq!(
+        transaction.validate(),
+        Err(rfb_labs_week_2::TransactionError::ZeroValueOutput)
+    );
+}
+
+#[test]
+fn validation_rejects_mixed_coinbase_and_regular_inputs() {
+    let mut transaction = Transaction::new(2, 0);
+    transaction.add_input(regular_input(1_000));
+    transaction.add_input(InputKind::Coinbase {
+        block_height: 100,
+        reward: 1_000,
+    });
+    transaction.add_output(output(1_000, "bc1qreceiver"));
+
+    assert_eq!(
+        transaction.validate(),
+        Err(rfb_labs_week_2::TransactionError::CoinbaseMixedWithRegularInputs)
     );
 }
